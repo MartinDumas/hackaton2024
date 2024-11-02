@@ -12,14 +12,13 @@ active_complaints = {}
 
 # Структура скарги
 class Complaint:
-    def __init__(self, name=None, last_name=None, city=None, phone=None, text=None, is_anonymous=False, media=None):
+    def __init__(self, name=None, city=None, number=None, text=None, media=None, is_anonymous=False):
         self.name = name
-        self.last_name = last_name
         self.city = city
-        self.phone = phone
+        self.number = number
         self.text = text
-        self.is_anonymous = is_anonymous
         self.media = media if media else []
+        self.is_anonymous = is_anonymous
 
 # Обробник для стартової команди
 @bot.message_handler(commands=['start'])
@@ -52,7 +51,7 @@ def callback_query(call):
                     bot.send_message(call.message.chat.id, f"Скарга (анонімна): {c.text}\n{media_info}")
                 else:
                     bot.send_message(call.message.chat.id,
-                                     f"Скарга від {c.name} {c.last_name} ({c.city}, {c.phone}): {c.text}\n{media_info}")
+                                     f"Скарга від {c.name} ({c.city}, {c.number}): {c.text}\n{media_info}")
         else:
             bot.send_message(call.message.chat.id, 'Немає заявок.')
 
@@ -72,42 +71,31 @@ def handle_anonymous_complaint(message):
     active_complaints[message.chat.id] = complaint
     bot.send_message(message.chat.id,
                      'Ваша анонімна скарга була успішно відправлена.\nТепер можете прикріпити медіа (фото, відео, аудіо) або натисніть /done для завершення.')
-    # Ініціалізуємо порожній список медіа, якщо ще не зроблено
-    if not complaint.media:
-        complaint.media = []
     bot.register_next_step_handler(message, handle_media_attachment)
 
 # Обробники для скарги з даними
 def handle_complaint_name(message):
     name = message.text
-    bot.send_message(message.chat.id, 'Будь ласка, вкажіть своє прізвище.')
-    bot.register_next_step_handler(message, handle_complaint_last_name, name)
-
-def handle_complaint_last_name(message, name):
-    last_name = message.text
     bot.send_message(message.chat.id, 'Будь ласка, вкажіть місто.')
-    bot.register_next_step_handler(message, handle_complaint_city, name, last_name)
+    bot.register_next_step_handler(message, handle_complaint_city, name)
 
-def handle_complaint_city(message, name, last_name):
+def handle_complaint_city(message, name):
     city = message.text
     bot.send_message(message.chat.id, 'Будь ласка, вкажіть номер телефону.')
-    bot.register_next_step_handler(message, handle_complaint_phone, name, last_name, city)
+    bot.register_next_step_handler(message, handle_complaint_number, name, city)
 
-def handle_complaint_phone(message, name, last_name, city):
-    phone = message.text
+def handle_complaint_number(message, name, city):
+    number = message.text
     bot.send_message(message.chat.id, 'Будь ласка, напишіть текст Вашої скарги.')
-    bot.register_next_step_handler(message, handle_complaint_text, name, last_name, city, phone)
+    bot.register_next_step_handler(message, handle_complaint_text, name, city, number)
 
-def handle_complaint_text(message, name, last_name, city, phone):
+def handle_complaint_text(message, name, city, number):
     complaint_text = message.text
-    complaint = Complaint(name=name, last_name=last_name, city=city, phone=phone, text=complaint_text)
+    complaint = Complaint(name=name, city=city, number=number, text=complaint_text)
     complaints.append(complaint)
     active_complaints[message.chat.id] = complaint
     bot.send_message(message.chat.id,
                      'Текст для скарги додано.\nТепер можете прикріпити медіа (фото, відео, аудіо) або натисніть /done для завершення.')
-    # Ініціалізуємо порожній список медіа, якщо ще не зроблено
-    if not complaint.media:
-        complaint.media = []
     bot.register_next_step_handler(message, handle_media_attachment)
 
 # Обробник медіа файлів
@@ -118,14 +106,12 @@ def handle_media_attachment(message):
         bot.send_message(message.chat.id, 'Немає активної скарги для додавання медіа.')
         return
 
-    # Перевіряємо, чи користувач не завершив додавання скарги
     if message.text and message.text == '/done':
         done(message)
         return
 
-    # Обробляємо медіа, якщо ще не завершено
     if message.content_type == 'photo':
-        file_id = message.photo[-1].file_id  # Отримуємо ID найбільшого фото
+        file_id = message.photo[-1].file_id
         complaint.media.append(file_id)
         bot.send_message(message.chat.id, 'Фото успішно додано до скарги.')
     elif message.content_type == 'video':
@@ -144,9 +130,9 @@ def handle_media_attachment(message):
 def done(message):
     complaint = active_complaints.get(message.chat.id)
     if complaint:
-        send_complaint_to_backend(complaint)  # Відправляємо скаргу на бекенд
-        del active_complaints[message.chat.id]  # Видаляємо активну скаргу
-        bot.clear_step_handler_by_chat_id(message.chat.id)  # Очищаємо обробники для цього чату
+        send_complaint_to_backend(complaint)
+        del active_complaints[message.chat.id]
+        bot.clear_step_handler_by_chat_id(message.chat.id)
         bot.send_message(message.chat.id, 'Скарга успішно збережена та відправлена на сервер.')
     else:
         bot.send_message(message.chat.id, 'Немає активної скарги для завершення.')
@@ -164,23 +150,23 @@ def show_menu(message):
     bot.send_message(message.chat.id, 'Оберіть дію:', reply_markup=markup)
 
 def send_complaint_to_backend(complaint):
-    url = 'http://localhost:8080/api/complaints/submit'  # Замість localhost, додайте ваш сервер
+    url = 'http://localhost:8080/api/reports/create'
     data = {
         "name": complaint.name,
-        "lastName": complaint.last_name,
         "city": complaint.city,
-        "phoneNumber": complaint.phone,
-        "complaintText": complaint.text,
-        "media": complaint.media  # список медіа файлів як список рядків
+        "number": complaint.number,
+        "text": complaint.text,
+        "filesUrls": complaint.media
     }
+    print(data)
 
     try:
         response = requests.post(url, json=data)
         if response.status_code == 200:
-            print("Complaint sent successfully to the backend!")
+            print("Скаргу успішно надіслано на бекенд!")
         else:
-            print(f"Failed to send complaint. Status code: {response.status_code}")
+            print(f"Не вдалося надіслати скаргу. Статус-код: {response.status_code}")
     except Exception as e:
-        print(f"Error occurred while sending complaint: {e}")
+        print(f"Сталася помилка під час надсилання скарги: {e}")
 
 bot.polling(none_stop=True)
